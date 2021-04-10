@@ -35,29 +35,30 @@ together at a system level, without having one large "system" diagram.
 
 ## Working Notes
 ### Milestones
-* Load my plugin that creates a new section in the toolbar
-    * Better to add a context click option?
-        * Have a `Plugin: Local Link` option, with children `Open Local Link`
-          & `Create Local Link`
-    * Check how other plugins work...
 * Create an input box & two buttons (save, remove)
 * Save -> saves a link value into the diagram that can can be saved/exported
 * Remove -> removes link value from the diagram (persists saves)
 * Use saved link value to open the new diagram in a new window
 ### Developing
-* Only Drawio-desktop should work (due to knowing local path of drawio file), but online version should report this too
+* Previously, was thinking to add to the actual drawio src, but its `closed open source` now
+    * src/main/webapp/js/diagramly/Editor.js:3698 - searched 'data:action/json'
+    * src/main/webapp/js/diagramly/App.js:3664
+* Only Drawio-desktop should work (due to knowing local path of drawio file),
+  but online version should report this too
 * Get drawio-deskop & git submodule update --init
     * `npm install` in there and in `drawio` submodule
     * `npm start` in drawio-deskop root
+* Building Drawio (non-desktop version):
+    * Building / running / killing - need `ant` and python: From `drawio` main repo:
+    * ```
+        (cd etc/build; ant); \
+        (cd src/main/webapp; python -m SimpleHTTPServer &); \
+        firefox "localhost:8000"; \
+        kill $(ps -ef | grep SimpleHTTPServer | grep -v grep | awk '{print $2}');
+    ```
 
 ### Task Resources / Helpful Notes
-* Reference exapmle plugins in `drawio` - `src/main/webapp/plugins`
-    * https://desk.draw.io/support/solutions/articles/16000056430-list-of-diagrams-net-plugins
-* https://stackoverflow.com/questions/38530293/electron-get-full-path-of-uploaded-file
-    * Check if File object has path property - `if 'path' in files[0] { files[0].path }`
-    * Should have in Electron, but not in browser version
-* Prexisting Plugins
-    * Use explore.js for adding context click
+* Reference example plugins in `drawio` - `src/main/webapp/plugins`
     * Use svgdata.js to add metadata to svg... how to make work for png?
         * From here https://stackoverflow.com/questions/56284570/how-to-programatically-extract-xml-data-from-draw-io-png
           they embed the xml data in png... so may just work...
