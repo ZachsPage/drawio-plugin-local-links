@@ -11,6 +11,21 @@ Draw.loadPlugin(function(ui) {
     var graph = ui.editor.graph;
     var cell_editor = graph.createCellEditor();
 
+    function TextButtonPair(parent_div) {
+        var text_area = document.createElement('textarea');
+        var submit_button = mxUtils.button(mxResources.get('apply'), function(){
+            alert("Button was clicked, value is " + text_area.value);
+        });
+        parent_div.appendChild(text_area);
+        parent_div.appendChild(submit_button);
+    }
+
+    // Similar to other dialogs in grapheditor/Dialogs.js
+    function LocalLinkDialog(ui) {
+        this.dialog_div = document.createElement('div');
+        TextButtonPair( this.dialog_div );
+    }
+
     // Class to shorten creation of menu items with `on click` actions
     function MenuAction(menu_text, action_name, on_click_fcn) {
         this.action = action_name;
@@ -23,7 +38,9 @@ Draw.loadPlugin(function(ui) {
     // Add new (right click menu items
     var menu_top = new MenuAction("Plugin: See Local Links...", "local_link_open_menu");
     var menu_open = new MenuAction("Open Local Link", "local_link_open",
-        function() { alert("Clicked open") });
+        function() { 
+            ui.showDialog( new LocalLinkDialog(ui).dialog_div, 320, 280, true, true);
+        });
     var menu_add = new MenuAction("Add Local Link", "local_link_create",
         function() { alert("Clicked add") });
     var old_menu = ui.menus.createPopupMenu;
