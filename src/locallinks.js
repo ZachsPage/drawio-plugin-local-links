@@ -97,7 +97,9 @@ Draw.loadPlugin(function(ui) {
 
     // Function - Called when opening the `Add Local Link`
     function populateLocalLinkDialogContent(cell) {
-        // Leave if the attribute doesnt exist
+        var attr_node = getCellsLocalLinkNode(cell);
+        if( ! attr_node ) return false;
+
         // Create text area for each link value that will be attempted in order
     }
 
@@ -107,7 +109,7 @@ Draw.loadPlugin(function(ui) {
     //   - Already done by Drawio source - allows custom node `values` but still 
     //     allows non-node value as the default attribute 'label'
     function populateLocalLinkXmlContent(cell) {
-        // If the attribute doesnt exist, create it
+        var attr_node = getCellsLocalLinkNode(cell, true);
         // For each text area with text, add the values ot the xml attributes
 
         // Hardcode a new file path to next diagram for now
@@ -116,30 +118,6 @@ Draw.loadPlugin(function(ui) {
         var hard_path = "/component_one/comp_one.drawio.png";
         var local_link = path.join(this_files_dir, hard_path);
         local_link = path.normalize(local_link);
-        
-        // Check if the current value is not or not - make it one
-        //cell_editor.startEditing(cell);
-        //var curr_node;
-        //if( cell.value && mxUtils.isNode(cell.value) ) {
-        //    curr_node = cell.cloneValue();
-        //} else {
-        //    new_doc = mxUtils.createXmlDocument();
-        //    curr_node = new_doc.createElement('ValueNode');
-        //    if( cell.value ) { // Keep non-node value as 'label' - see top `Note:...`
-        //        curr_node.setAttribute('label', cell.value);
-        //    }
-        //}
-
-        // Get / create our root node
-        //var our_root_node = curr_node.getAttribute(ROOT_NODE_NAME, '');
-        //if( !our_root_node ) {
-        //    // Todo - need this to an array - try first link first, then next, etc
-        //    curr_node.setAttribute(ROOT_NODE_NAME, 'created');
-        //    cell.value = curr_node;
-        //}
-
-        // Apply our changes
-        //cell_editor.stopEditing(false);
     }
 
     // Function - Called when attempting to open a local link
