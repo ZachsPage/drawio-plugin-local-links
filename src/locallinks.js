@@ -10,7 +10,7 @@ Draw.loadPlugin(function(ui) {
     var cell_editor = graph.createCellEditor();
 
     // Function - Check if file has the `path` property (only for drawio-desktop)
-    function pluginIsSupported() {
+    function pluginIsSupported(ui) {
         var current_file = ui.currentFile;
         if( ! (current_file && current_file.fileObject && current_file.fileObject.path) ) {
             alert("Not a local file opened in drawio-desktop")
@@ -19,6 +19,8 @@ Draw.loadPlugin(function(ui) {
         return true;
     }
 
+    // Menu Creation / Handling
+    ////////////////////////////////////////////////////////////////////////////
     // Class - Pair up the button and the text for the Dialog
     function TextButtonPair(parent_div) {
         var text_area = document.createElement('textarea');
@@ -53,6 +55,7 @@ Draw.loadPlugin(function(ui) {
 
         // Create our item variables tying the text -> action
         var menu_top = new MenuAction("Plugin: See Local Links...", "local_link_open_menu");
+        // Todo - only create if has link... show link icon in cell?
         var menu_open = new MenuAction("Open Local Link", "local_link_open", function(){ 
             if( !pluginIsSupported ) return;
             alert("Clicked open") 
@@ -69,10 +72,15 @@ Draw.loadPlugin(function(ui) {
         this.addMenuItems(menu, ['-', menu_add.action], top_menu, evt);
     }
 
-    function getCellsLocalLinkNode(cell, create_node) {
+    // XML Attribute Handling
+    const ROOT_NODE_NAME = 'local-links' //< Attribute name for local-link data
+    ////////////////////////////////////////////////////////////////////////////
+    // @return Attribute to store local-links data, or false if not found
+    // @param cell Cell of interest @param create_node True to create if not found
+    function getCellsLocalLinkAttribute(cell, create_node) {
         // Check if the current value is not or not - make it one
         var curr_node;
-        if( cell.value && mxUtils.isNode(cell.value) ) {
+        if( cell && cell.value && mxUtils.isNode(cell.value) ) {
             curr_node = cell.cloneValue();
         } else {
             if( !create_node ) return false;
@@ -82,22 +90,33 @@ Draw.loadPlugin(function(ui) {
                 curr_node.setAttribute('label', cell.value);
             }
         }
-        // Get / create our root node
-        const ROOT_NODE_NAME = 'local-links'
-        var our_root_node = curr_node.getAttribute(ROOT_NODE_NAME, '');
-        if( our_root_node ) return our_root_node;
+        // Check for attribute - return the valid node
+        var local_link_data = curr_node.getAttribute(ROOT_NODE_NAME, '');
+        if( local_link_data ) return curr_node;
         if( !create_node ) return false;
-
-        // Todo - need this to an array - try first link first, then next, etc
+        // - Create attribute with default value
         cell_editor.startEditing(cell);
         curr_node.setAttribute(ROOT_NODE_NAME, 'created');
         cell.value = curr_node;
         cell_editor.stopEditing(false);
+        return curr_node.getAttribute(ROOT_NODE_NAME, '');
+    }
+
+    // Function - @return True if local-links data existed and was removed
+    // - Tdo - not sure if this fully works yet...
+    function removeLocalLinks(cell) {
+        if( !(cell && cell.value && mxUtils.isNode(cell.value)) ) return false;
+        var local_link_data = cell.value.getAttribute(ROOT_NODE_NAME, '');
+        if( !local_link_data ) return false;
+        cell_editor.startEditing(cell);
+        cell.value.removeAttribute(ROOT_NODE_NAME);
+        cell_editor.stopEditing(false);
+        return true;
     }
 
     // Function - Called when opening the `Add Local Link`
     function populateLocalLinkDialogContent(cell) {
-        var attr_node = getCellsLocalLinkNode(cell);
+        var attr_node = getCellsLocalLinkAttribute(cell);
         if( ! attr_node ) return false;
 
         // Create text area for each link value that will be attempted in order
@@ -109,7 +128,7 @@ Draw.loadPlugin(function(ui) {
     //   - Already done by Drawio source - allows custom node `values` but still 
     //     allows non-node value as the default attribute 'label'
     function populateLocalLinkXmlContent(cell) {
-        var attr_node = getCellsLocalLinkNode(cell, true);
+        var attr_node = getCellsLocalLinkAttribute(cell, true);
         // For each text area with text, add the values ot the xml attributes
 
         // Hardcode a new file path to next diagram for now
@@ -137,5 +156,49 @@ Draw.loadPlugin(function(ui) {
             });
         }
     }
+
+    // Class - Cell data for our local link 
+    function LocalLinkData() {
+        this.relative_paths; //!< Array to store the relative paths
+        this.vers = 1; //< Version data in-case we change functionality
+        this.key; //< Store the key, see isValid()
+        this.Init = function() { this.key = 0x5050; }
+
+        // Function - check that the decoded object is valid - static since not encoded
+        this.localLinksValid = function() { return this.key == 0x5050 ? true : false }
+    };
+
+    // Todo - Remove, only used for testing...
+    graph.click= function(me) {
+		// props.js - async required to enable hyperlinks in labels
+		window.setTimeout(function() {
+            var clicked_cell = me.getCell();
+            if( ! clicked_cell ) return;
+
+            var possible_root = getCellsLocalLinkAttribute(clicked_cell, true);
+            if( possible_root == false ) {
+                alert('Does not have attribute');
+            } else {
+                var obj_codec = new mxObjectCodec(new LocalLinkData());
+                mxCodecRegistry.register(obj_codec);
+                var enc = new mxCodec();
+
+                var new_obj = new LocalLinkData();
+                new_obj.Init();
+                new_obj.relative_paths = ['path_one', 'path_two'];
+                var encoded_obj = obj_codec.encode(enc, new_obj);
+                var encoded_html = encoded_obj.outerHTML;
+                
+                var doc = mxUtils.parseXml(encoded_html);
+                var decoded_data = obj_codec.decode(enc, doc.firstChild);
+                if( decoded_data && 'localLinksValid' in decoded_data ) {
+                    decoded_data.localLinksValid() ? alert("data is valid") : alert("Invalid")
+                }
+
+                removeLocalLinks(clicked_cell) ?
+                    alert("Removed Link data") : alert("Did not remove link data");
+            }
+		}, 0);
+	};
 
 }); // End loadPlugin
