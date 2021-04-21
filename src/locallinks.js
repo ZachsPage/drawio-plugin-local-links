@@ -157,8 +157,10 @@ Draw.loadPlugin(function(ui) {
         }
     }
 
+    // The XML element name for storing the data - MUST MATCH THE CLASS NAME
+    const ROOT_ELEMENT_NAME = 'LocalLinkPluginData'
     // Class - Cell data for our local link 
-    function LocalLinkData() {
+    function LocalLinkPluginData() {
         this.relative_paths; //!< Array to store the relative paths
         this.vers = 1; //< Version data in-case we change functionality
         this.key; //< Store the key, see isValid()
@@ -167,6 +169,24 @@ Draw.loadPlugin(function(ui) {
         // Function - check that the decoded object is valid - static since not encoded
         this.localLinksValid = function() { return this.key == 0x5050 ? true : false }
     };
+    function getLocalLinkPluginData(xml_doc) {
+        var data_node = xml_doc.getElementsByTagName( ROOT_ELEMENT_NAME );
+        if( data_node.length == 1 ) {
+            return data_node[0];
+        } else {
+            // Todo - shouldnt have more than one Element by this name,
+            //  but should probably account for removing them...
+            return null;
+        }
+    }
+    function updateLocalLinkPluginData(xml_doc) {
+        var created_node = getLocalLinkPluginData(xml_doc);
+        if( !created_node ) {
+            // Not sure if I should create root element... check for it first?
+        } else {
+            // Update the element's HTML if found
+        }
+    }
 
     // Todo - Remove, only used for testing...
     graph.click= function(me) {
@@ -175,29 +195,48 @@ Draw.loadPlugin(function(ui) {
             var clicked_cell = me.getCell();
             if( ! clicked_cell ) return;
 
-            var possible_root = getCellsLocalLinkAttribute(clicked_cell, true);
-            if( possible_root == false ) {
-                alert('Does not have attribute');
+            // Register Object codec
+            var obj_codec = new mxObjectCodec(new LocalLinkPluginData());
+            mxCodecRegistry.register(obj_codec);
+            var enc = new mxCodec();
+            // Create new local object and get encoded version
+            var new_obj = new LocalLinkPluginData();
+            new_obj.Init();
+            new_obj.relative_paths = ['path_one', 'path_two'];
+            var encoded_obj = obj_codec.encode(enc, new_obj);
+            var encoded_html = encoded_obj.outerHTML;
+            // Create new doc - ensure no existing local-link data - insert
+            var new_doc = mxUtils.createXmlDocument();
+            var get_node = new_doc.getElementsByTagName(ROOT_ELEMENT_NAME);
+            if( ! get_node.length ) {
+                var new_node = new_doc.createElement(ROOT_ELEMENT_NAME);
+                var root_node = new_doc.firstChild;
+                if( ! root_node ) {
+                    root_node = new_doc.createElement("root");
+                    new_doc.appendChild(root_node);
+                }
+                root_node.appendChild(new_node);
+            }
+            // Check element is inserted now
+            get_node = new_doc.getElementsByTagName(ROOT_ELEMENT_NAME);
+            if( ! get_node.length ) {
+                alert("Still not inserted");
             } else {
-                var obj_codec = new mxObjectCodec(new LocalLinkData());
-                mxCodecRegistry.register(obj_codec);
-                var enc = new mxCodec();
-
-                var new_obj = new LocalLinkData();
-                new_obj.Init();
-                new_obj.relative_paths = ['path_one', 'path_two'];
-                var encoded_obj = obj_codec.encode(enc, new_obj);
-                var encoded_html = encoded_obj.outerHTML;
-                
-                var doc = mxUtils.parseXml(encoded_html);
-                var decoded_data = obj_codec.decode(enc, doc.firstChild);
+                // Try to get the invalid node
+                var decoded_data = obj_codec.decode(enc, new_doc.getElementsByTagName(ROOT_ELEMENT_NAME)[0]);
                 if( decoded_data && 'localLinksValid' in decoded_data ) {
                     decoded_data.localLinksValid() ? alert("data is valid") : alert("Invalid")
                 }
-
-                removeLocalLinks(clicked_cell) ?
-                    alert("Removed Link data") : alert("Did not remove link data");
+                // Change the HTML for the node, and check it is valid now
+                // - Replace existing outerHTML with our encoded object - instead of parentNode & replaceChild
+                get_node[0].outerHTML = encoded_html;
+                decoded_data = obj_codec.decode(enc, new_doc.getElementsByTagName(ROOT_ELEMENT_NAME)[0]);
+                if( decoded_data && 'localLinksValid' in decoded_data ) {
+                    decoded_data.localLinksValid() ? alert("data is valid") : alert("Invalid")
+                }
             }
+            alert( mxUtils.getPrettyXml(new_doc) );
+
 		}, 0);
 	};
 
