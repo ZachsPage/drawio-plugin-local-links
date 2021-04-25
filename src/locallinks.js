@@ -1,5 +1,6 @@
 
-const path = require('path').posix;
+const path_module = require('path').posix;
+const fs = require('fs');
 
 // Entry point for loading plugins
 Draw.loadPlugin(function(ui) {
@@ -17,25 +18,20 @@ Draw.loadPlugin(function(ui) {
             return false;
         }
         return true;
-    }
+    };
 
-    // Menu Creation / Handling
+    // Menu Button Creation
     ////////////////////////////////////////////////////////////////////////////
-    // Class - Pair up the button and the text for the Dialog
-    function TextButtonPair(parent_div) {
-        var text_area = document.createElement('textarea');
-        var submit_button = mxUtils.button(mxResources.get('apply'), function(){
-            alert("Button was clicked, value is " + text_area.value);
+    // Class - Shorten creation of text boxes with associated buttons
+    function TextButtonPair(parent_div, init_value) {
+        this.text_box = document.createElement('textarea');
+        if( init_value ) this.text_box.value = init_value; 
+        this.button = mxUtils.button(mxResources.get('apply'), () => {
+            alert("Button was clicked, value is " + this.text_box.value);
         });
-        parent_div.appendChild(text_area);
-        parent_div.appendChild(submit_button);
-    }
-
-    // Class - Similar to other dialogs in grapheditor/Dialogs.js
-    function LocalLinkDialog(ui) {
-        this.dialog_div = document.createElement('div');
-        TextButtonPair( this.dialog_div );
-    }
+        parent_div.appendChild( this.text_box );
+        parent_div.appendChild( this.button );
+    };
 
     // Class - Shorten creation of menu items with text & `on click` actions
     function MenuAction(menu_text, action_name, on_click_fcn) {
@@ -46,106 +42,114 @@ Draw.loadPlugin(function(ui) {
             ui.actions.addAction(this.action, function(){});
     };
 
-    // Add new right click menu items
+    // Override existing menu to add new right click menu items
     var old_menu = ui.menus.createPopupMenu;
     ui.menus.createPopupMenu = function(menu, cell, evt) {
         old_menu.apply(this, arguments);
         var can_store_link = graph.model.isVertex(graph.getSelectionCell());
         if( ! can_store_link ) return;
 
-        // Create our item variables tying the text -> action
-        var menu_top = new MenuAction("Plugin: See Local Links...", "local_link_open_menu");
-        // Todo - only create if has link... show link icon in cell?
-        var menu_open = new MenuAction("Open Local Link", "local_link_open", function(){ 
-            if( !pluginIsSupported ) return;
-            alert("Clicked open") 
-        });
-        var menu_add = new MenuAction("Add Local Link", "local_link_create", function(){ 
-            if( !pluginIsSupported ) return;
-            ui.showDialog( new LocalLinkDialog(ui).dialog_div, 320, 280, true, true);
-        });
-        // Add our top menu option the contains the submenu action items
+        // Create the plugin's menu items:
+        // - Top item to open the sub-menu
+        var menu_top = new MenuAction("Plugin: Local Links...", "local_link_open_menu");
         menu.addSeparator();
         var top_menu = this.addMenuItem(menu, menu_top.action, null, evt);
         menu.addSeparator();
-        this.addMenuItems(menu, ['-', menu_open.action], top_menu, evt);
-        this.addMenuItems(menu, ['-', menu_add.action], top_menu, evt);
-    }
-
-    // XML Attribute Handling
-    const ROOT_NODE_NAME = 'local-links' //< Attribute name for local-link data
-    ////////////////////////////////////////////////////////////////////////////
-    // @return Attribute to store local-links data, or false if not found
-    // @param cell Cell of interest @param create_node True to create if not found
-    function getCellsLocalLinkAttribute(cell, create_node) {
-        // Check if the current value is not or not - make it one
-        var curr_node;
-        if( cell && cell.value && mxUtils.isNode(cell.value) ) {
-            curr_node = cell.cloneValue();
-        } else {
-            if( !create_node ) return false;
-            new_doc = mxUtils.createXmlDocument();
-            curr_node = new_doc.createElement('ValueNode');
-            if( cell.value ) { // Keep non-node value as 'label' - see `Note:`
-                curr_node.setAttribute('label', cell.value);
-            }
+        // - Add the `Edit Link` sub-menu button
+        var menu_edit_links = new MenuAction("Edit Local Links", "local_link_edit", function(){ 
+            if( !pluginIsSupported(ui) ) return;
+            createLocalLinkEditorWindow(ui, cell);
+        });
+        this.addMenuItems(menu, ['-', menu_edit_links.action], top_menu, evt);
+        // - Add the `Open` sub-menu button - if the cell has some local links
+        var cells_xml = getCellsXmlDataElem(cell);
+        if( cells_xml && getLocalLinkXmlNode(cells_xml) ) {
+            var menu_open_link = new MenuAction("Open Local Link", "local_link_open",
+              function(){ 
+                if( !pluginIsSupported(ui) ) return;
+                openLocalLink(ui, cell);
+            });
+        this.addMenuItems(menu, ['-', menu_open_link.action], top_menu, evt);
         }
-        // Check for attribute - return the valid node
-        var local_link_data = curr_node.getAttribute(ROOT_NODE_NAME, '');
-        if( local_link_data ) return curr_node;
-        if( !create_node ) return false;
-        // - Create attribute with default value
-        cell_editor.startEditing(cell);
-        curr_node.setAttribute(ROOT_NODE_NAME, 'created');
-        cell.value = curr_node;
-        cell_editor.stopEditing(false);
-        return curr_node.getAttribute(ROOT_NODE_NAME, '');
-    }
+    };
 
-    // Function - @return True if local-links data existed and was removed
-    // - Tdo - not sure if this fully works yet...
-    function removeLocalLinks(cell) {
-        if( !(cell && cell.value && mxUtils.isNode(cell.value)) ) return false;
-        var local_link_data = cell.value.getAttribute(ROOT_NODE_NAME, '');
-        if( !local_link_data ) return false;
-        cell_editor.startEditing(cell);
-        cell.value.removeAttribute(ROOT_NODE_NAME);
-        cell_editor.stopEditing(false);
-        return true;
-    }
+    // Menu Button Click Handling
+    ////////////////////////////////////////////////////////////////////////////
+    // Function - Create the window to create / edit / view local links
+    function createLocalLinkEditorWindow(ui, cell) {
+        // Class - window to show / add local links
+        //  - Similar to other dialogs in grapheditor/Dialogs.js
+        function LocalLinkDialog(ui, cell) {
+            this.dialog_div = document.createElement('div');
+            this.link_box_button_pairs = [];
+            const MAX_LINKS = 10;
+            this.addNewLinkTextBox = function(init_value) {
+                if( this.link_box_button_pairs.length >= MAX_LINKS ) return;
+                this.link_box_button_pairs.push(
+                    new TextButtonPair(this.dialog_div, init_value) );
+            }
+            // Populate boxes for each existing local link
+            var create_data = true;
+            cells_xml = getCellsXmlDataElem(cell, create_data);
+            if( ! cells_xml ) {
+                alert("Plugin: Local Links - Failed to create XML data!");
+                return;
+            }
+            var links = new LocalLinkPluginData();
+            if( links.readFromXml(cells_xml) && links.relative_paths.length ) {
+                links.relative_paths.forEach((path) => {
+                    this.addNewLinkTextBox( path );
+                });
+            } else {
+                this.addNewLinkTextBox();
+            }
+            // Add final buttons
+            var new_link_button = mxUtils.button("Add New Link", () => {
+                this.addNewLinkTextBox();
+            });
+            this.dialog_div.append(new_link_button);
+            var apply_button = mxUtils.button("Apply", () => {
+                while( links.relative_paths.length > 0 ) links.relative_paths.pop();
+                this.link_box_button_pairs.forEach((pair) => {
+                    var box_value = pair.text_box.value;
+                    if( box_value ) box_value = box_value.trim();
+                    if( box_value ) links.relative_paths.push(box_value);
+                });
+                if( ! links.writeToXml(cells_xml) ) 
+                    alert("Plugin: Local Links - Failed to store links!");
+            });
+            this.dialog_div.append(apply_button);
+        };
+        ui.showDialog( new LocalLinkDialog(ui, cell).dialog_div, 320, 280, true, true);
+    };
+    // Function - Attempt to a new Drawio instance using a local link
+    function openLocalLink(ui, cell) {
+        // Know we can get the local files path since the plugin is supported
+        var local_file_path = ui.currentFile.fileObject.path;
+        var this_files_dir = path_module.dirname(local_file_path);
+        // Know cells_xml is valid since this button was added
+        var cells_xml = getCellsXmlDataElem(cell);
+        var links = new LocalLinkPluginData();
+        if( links.readFromXml(cells_xml) ) {
+            var link_to_use = "";
+            links.relative_paths.forEach((path) => {
+                var local_link = path_module.join(this_files_dir, path);
+                local_link = path_module.normalize(local_link);
+                if( fs.existsSync(local_link) ) {
+                    // Get the first existing file then leave
+                    link_to_use = local_link;
+                    return;
+                }
+            });
 
-    // Function - Called when opening the `Add Local Link`
-    function populateLocalLinkDialogContent(cell) {
-        var attr_node = getCellsLocalLinkAttribute(cell);
-        if( ! attr_node ) return false;
+            link_to_use ? 
+                openNewDrawioWindow(link_to_use) :
+                alert("Plugin - locallinks - No valid local files found. " +
+                    "In order, attempted to use : \n  - " + 
+                    links.relative_paths.join('\n  - '));
+        }
 
-        // Create text area for each link value that will be attempted in order
-    }
-
-    // Function - Called  when applying the changes made during `Add Local Link`
-    // - Note: From mxGraph->mxCell docs - override functions to allow custom 
-    //    attributes graph.convertValueToString & graph.cellLabelChanged 
-    //   - Already done by Drawio source - allows custom node `values` but still 
-    //     allows non-node value as the default attribute 'label'
-    function populateLocalLinkXmlContent(cell) {
-        var attr_node = getCellsLocalLinkAttribute(cell, true);
-        // For each text area with text, add the values ot the xml attributes
-
-        // Hardcode a new file path to next diagram for now
-        var local_file_path = current_file.fileObject.path;
-        var this_files_dir = path.dirname(local_file_path);
-        var hard_path = "/component_one/comp_one.drawio.png";
-        var local_link = path.join(this_files_dir, hard_path);
-        local_link = path.normalize(local_link);
-    }
-
-    // Function - Called when attempting to open a local link
-    function openLocalLink(cell) {
-        // Leave if no values for the custom attribute
-        // Start at first attribute, concat, if not exist, go to next
-        // If exists, open - if not alert error, print what was tried
-
-        // Create/grab the new window, then once its loaded, load the new file
+        // Function - create new Drawio instance, then make it load the new file
         function openNewDrawioWindow(file_link) {
             const { ipcRenderer } = require('electron');
             const { BrowserWindow } = require('electron').remote
@@ -154,90 +158,82 @@ Draw.loadPlugin(function(ui) {
             new_window.webContents.on('did-finish-load', function() {
                 new_window.webContents.send('args-obj', {args: [file_link]});
             });
-        }
-    }
+        };
+    };
 
+    // Plugin's Main Embeddable Data Object
+    ////////////////////////////////////////////////////////////////////////////
     // The XML element name for storing the data - MUST MATCH THE CLASS NAME
     const ROOT_ELEMENT_NAME = 'LocalLinkPluginData'
-    // Class - Cell data for our local link 
+    // Class - Data to store / retrieve for local links
     function LocalLinkPluginData() {
-        this.relative_paths; //!< Array to store the relative paths
+        this.relative_paths = []; //!< Array to store the relative paths
         this.vers = 1; //< Version data in-case we change functionality
         this.key; //< Store the key, see isValid()
         this.Init = function() { this.key = 0x5050; }
-
-        // Function - check that the decoded object is valid - static since not encoded
-        this.localLinksValid = function() { return this.key == 0x5050 ? true : false }
+        // Function - check that the decoded object is valid - MUST match this.key
+        this.isValid = function() { return this.key == 0x5050 ? true : false }
+        // Function - populate object with elements from an cells_xml
+        this.readFromXml = function(cells_xml) {
+            var xml_node = getLocalLinkXmlNode(cells_xml);
+            if( xml_node == null ) return false;
+            var enc = new mxCodec();
+            var obj_codec = mxCodecRegistry.getCodec(LocalLinkPluginData);
+            this.key = 0x0000; //< Reset key to check validity after decode
+            obj_codec.decode(enc, xml_node, this);
+            if( ! ('isValid' in this) ) return false;
+            return this.isValid();
+        };
+        // Function - create / replace related xml elements
+        this.writeToXml = function(cells_xml) {
+            var create = true;
+            var xml_node = getLocalLinkXmlNode(cells_xml, create);
+            if( xml_node == null ) return false;
+            var enc = new mxCodec();
+            this.Init(); //< Set the key before encoding
+            var obj_codec = mxCodecRegistry.getCodec(LocalLinkPluginData);
+            xml_node.outerHTML = obj_codec.encode(enc, this).outerHTML;
+            return true;
+        };
     };
-    function getLocalLinkPluginData(xml_doc) {
-        var data_node = xml_doc.getElementsByTagName( ROOT_ELEMENT_NAME );
-        if( data_node.length == 1 ) {
-            return data_node[0];
-        } else {
-            // Todo - shouldnt have more than one Element by this name,
-            //  but should probably account for removing them...
+    // LocalLinkPluginData static functions - `static` syntax not supported
+    // - Function - @return Local Link XML node, or null if not found
+    //   @param cells_xml Doc to use  @param create Will create node if true
+    function getLocalLinkXmlNode(cells_xml, create) {
+        var matching_nodes = cells_xml.getElementsByTagName(ROOT_ELEMENT_NAME);
+        if( matching_nodes.length > 1 ) {
+            alert("Todo - multiple matching local-link nodes... clean 'em");
             return null;
         }
-    }
-    function updateLocalLinkPluginData(xml_doc) {
-        var created_node = getLocalLinkPluginData(xml_doc);
-        if( !created_node ) {
-            // Not sure if I should create root element... check for it first?
-        } else {
-            // Update the element's HTML if found
+        if( matching_nodes.length <= 0 ) {
+            if( ! create ) return null;
+            var doc_utils = mxUtils.createXmlDocument();
+            var new_node = doc_utils.createElement(ROOT_ELEMENT_NAME);
+            cells_xml.appendChild(new_node);
+            return new_node;
         }
-    }
+        return matching_nodes[0];
+    };
+    // Register Object codec
+    mxCodecRegistry.register( new mxObjectCodec(new LocalLinkPluginData()) );
 
-    // Todo - Remove, only used for testing...
-    graph.click= function(me) {
-		// props.js - async required to enable hyperlinks in labels
-		window.setTimeout(function() {
-            var clicked_cell = me.getCell();
-            if( ! clicked_cell ) return;
-
-            // Register Object codec
-            var obj_codec = new mxObjectCodec(new LocalLinkPluginData());
-            mxCodecRegistry.register(obj_codec);
-            var enc = new mxCodec();
-            // Create new local object and get encoded version
-            var new_obj = new LocalLinkPluginData();
-            new_obj.Init();
-            new_obj.relative_paths = ['path_one', 'path_two'];
-            var encoded_obj = obj_codec.encode(enc, new_obj);
-            var encoded_html = encoded_obj.outerHTML;
-            // Create new doc - ensure no existing local-link data - insert
-            var new_doc = mxUtils.createXmlDocument();
-            var get_node = new_doc.getElementsByTagName(ROOT_ELEMENT_NAME);
-            if( ! get_node.length ) {
-                var new_node = new_doc.createElement(ROOT_ELEMENT_NAME);
-                var root_node = new_doc.firstChild;
-                if( ! root_node ) {
-                    root_node = new_doc.createElement("root");
-                    new_doc.appendChild(root_node);
-                }
-                root_node.appendChild(new_node);
-            }
-            // Check element is inserted now
-            get_node = new_doc.getElementsByTagName(ROOT_ELEMENT_NAME);
-            if( ! get_node.length ) {
-                alert("Still not inserted");
-            } else {
-                // Try to get the invalid node
-                var decoded_data = obj_codec.decode(enc, new_doc.getElementsByTagName(ROOT_ELEMENT_NAME)[0]);
-                if( decoded_data && 'localLinksValid' in decoded_data ) {
-                    decoded_data.localLinksValid() ? alert("data is valid") : alert("Invalid")
-                }
-                // Change the HTML for the node, and check it is valid now
-                // - Replace existing outerHTML with our encoded object - instead of parentNode & replaceChild
-                get_node[0].outerHTML = encoded_html;
-                decoded_data = obj_codec.decode(enc, new_doc.getElementsByTagName(ROOT_ELEMENT_NAME)[0]);
-                if( decoded_data && 'localLinksValid' in decoded_data ) {
-                    decoded_data.localLinksValid() ? alert("data is valid") : alert("Invalid")
-                }
-            }
-            alert( mxUtils.getPrettyXml(new_doc) );
-
-		}, 0);
-	};
+    // Generic Helper Functions
+    ////////////////////////////////////////////////////////////////////////////
+    // Function - @return Xml document used as a cell's `value`  @param cell Cell  
+    // @param create_data Make's cell's value support XML elements / nodes
+    // - Note: From mxGraph->mxCell docs - override functions (already done in
+    //   Drawio source) `graph.convertValueToString` & `graph.cellLabelChanged`
+    //   to allow XML - create attribute `label` to preserve non-node values
+    function getCellsXmlDataElem(cell, create_data) {
+        if( ! cell ) return null;
+        if( cell.value && mxUtils.isNode(cell.value) ) return cell.value;
+        if( !create_data ) return null;
+        var cells_non_node_value = cell.value;
+        cell.value = mxUtils.createXmlDocument().createElement('root');
+        if( cells_non_node_value ) { //< Read above function doc
+            cell.value.setAttribute('label', cells_non_node_value);
+        }
+        return cell.value;
+    };
 
 }); // End loadPlugin
