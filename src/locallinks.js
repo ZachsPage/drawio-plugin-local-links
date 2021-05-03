@@ -20,19 +20,27 @@ Draw.loadPlugin(function(ui) {
         return true;
     };
 
-    // Menu Button Creation
+    // Generic Helper Functions
     ////////////////////////////////////////////////////////////////////////////
-    // Class - Shorten creation of text boxes with associated buttons
-    function TextButtonPair(parent_div, init_value) {
-        this.text_box = document.createElement('textarea');
-        if( init_value ) this.text_box.value = init_value; 
-        this.button = mxUtils.button(mxResources.get('apply'), () => {
-            alert("Button was clicked, value is " + this.text_box.value);
-        });
-        parent_div.appendChild( this.text_box );
-        parent_div.appendChild( this.button );
+    // Function - @return Xml document used as a cell's `value`  @param cell Cell  
+    // @param create_data Make's cell's value support XML elements / nodes
+    // - Note: From mxGraph->mxCell docs - override functions (already done in
+    //   Drawio source) `graph.convertValueToString` & `graph.cellLabelChanged`
+    //   to allow XML - create attribute `label` to preserve non-node values
+    function getCellsXmlDataElem(cell, create_data) {
+        if( ! cell ) return null;
+        if( cell.value && mxUtils.isNode(cell.value) ) return cell.value;
+        if( !create_data ) return null;
+        var cells_non_node_value = cell.value;
+        cell.value = mxUtils.createXmlDocument().createElement('root');
+        if( cells_non_node_value ) { //< Read above function doc
+            cell.value.setAttribute('label', cells_non_node_value);
+        }
+        return cell.value;
     };
 
+    // Menu Creation
+    ////////////////////////////////////////////////////////////////////////////
     // Class - Shorten creation of menu items with text & `on click` actions
     function MenuAction(menu_text, action_name, on_click_fcn) {
         this.action = action_name;
@@ -41,7 +49,6 @@ Draw.loadPlugin(function(ui) {
         on_click_fcn ? ui.actions.addAction(this.action, on_click_fcn) :
             ui.actions.addAction(this.action, function(){});
     };
-
     // Override existing menu to add new right click menu items
     var old_menu = ui.menus.createPopupMenu;
     ui.menus.createPopupMenu = function(menu, cell, evt) {
@@ -75,52 +82,107 @@ Draw.loadPlugin(function(ui) {
 
     // Menu Button Click Handling
     ////////////////////////////////////////////////////////////////////////////
+    // Class - Shorten creation of text boxes with associated buttons
+    function TextAndRemoveButtonPair(parent_div, init_value, rm_callback) {
+        this.parent_div = parent_div;
+        this.text_box = document.createElement('textarea');
+        this.rm_callback = null;
+        this.addRMCallback = function(cb) { this.rm_callback = cb; } 
+        this.button = mxUtils.button('Remove', () => {
+            this.parent_div.removeChild( this.button );
+            this.parent_div.removeChild( this.text_box );
+            if( this.rm_callback ) this.rm_callback();
+        });
+        // Style / append elements
+        this.text_box.style.resize = 'none';
+        this.text_box.style.width = "75%"
+        this.text_box.style.height = "34px"
+        this.text_box.style.float = 'left'
+        this.text_box.style.marginBottom = '5px'
+        if( init_value ) this.text_box.value = init_value; 
+        parent_div.appendChild( this.text_box );
+        this.button.style.float = 'left'
+        this.button.style.height = '34px'
+        this.button.style.margin = '2px 2px 2px 5px'
+        parent_div.appendChild( this.button );
+    };
+
     // Function - Create the window to create / edit / view local links
     function createLocalLinkEditorWindow(ui, cell) {
         // Class - window to show / add local links
         //  - Similar to other dialogs in grapheditor/Dialogs.js
         function LocalLinkDialog(ui, cell) {
-            this.dialog_div = document.createElement('div');
             this.link_box_button_pairs = [];
-            const MAX_LINKS = 10;
-            this.addNewLinkTextBox = function(init_value) {
+            const MAX_LINKS = 5;
+            // Function to add a new removable text box to current dialog
+            this.addNewLinkTextBox = function(init_value, prepend) {
                 if( this.link_box_button_pairs.length >= MAX_LINKS ) return;
-                this.link_box_button_pairs.push(
-                    new TextButtonPair(this.dialog_div, init_value) );
+                var new_box = new TextAndRemoveButtonPair(this.link_div, init_value, prepend);
+                new_box.addRMCallback( () => {
+                    var box_idx = this.link_box_button_pairs.indexOf(new_box);
+                    this.link_box_button_pairs.splice(box_idx, 1);
+                })
+                this.link_box_button_pairs.push( new_box );
             }
-            // Populate boxes for each existing local link
-            var create_data = true;
-            cells_xml = getCellsXmlDataElem(cell, create_data);
+            // Create the base divs to keep the element order correct
+            this.dialog_div = document.createElement('div');
+            this.button_div = document.createElement('div');
+            this.dialog_div.append( this.button_div );
+            this.link_div = document.createElement('div');
+            this.dialog_div.append( this.link_div );
+            // Make sure we can write links out
+            cells_xml = getCellsXmlDataElem(cell, true);
             if( ! cells_xml ) {
                 alert("Plugin: Local Links - Failed to create XML data!");
                 return;
             }
-            var links = new LocalLinkPluginData();
-            if( links.readFromXml(cells_xml) && links.relative_paths.length ) {
-                links.relative_paths.forEach((path) => {
+            // Read cells existing links / populate text boxes
+            this.link_data = new LocalLinkPluginData();
+            if( this.link_data.readFromXml(cells_xml) && this.link_data.relative_paths.length ) {
+                this.link_data.relative_paths.forEach((path) => {
                     this.addNewLinkTextBox( path );
                 });
             } else {
-                this.addNewLinkTextBox();
+                this.addNewLinkTextBox(); //< Add a blank box if no links exist
             }
-            // Add final buttons
-            var new_link_button = mxUtils.button("Add New Link", () => {
-                this.addNewLinkTextBox();
-            });
-            this.dialog_div.append(new_link_button);
-            var apply_button = mxUtils.button("Apply", () => {
-                while( links.relative_paths.length > 0 ) links.relative_paths.pop();
+            // Add instructional text
+            this.button_div.innerHTML = "Add a link to another Drawio diagram using "+
+                "the relative path from the currently opened Drawio file. Paths listed "+
+                "higher will be attemped first - using the rest as alternatives on failure. <br/><br/>"
+            // Add button to write out new LocalLink data
+            var apply_button = mxUtils.button("Apply Changes", () => {
+                while( this.link_data.relative_paths.length > 0 ) 
+                    this.link_data.relative_paths.pop();
                 this.link_box_button_pairs.forEach((pair) => {
                     var box_value = pair.text_box.value;
                     if( box_value ) box_value = box_value.trim();
-                    if( box_value ) links.relative_paths.push(box_value);
+                    if( box_value ) this.link_data.relative_paths.push(box_value);
                 });
-                if( ! links.writeToXml(cells_xml) ) 
+                if( ! this.link_data.writeToXml(cells_xml) ) 
                     alert("Plugin: Local Links - Failed to store links!");
             });
-            this.dialog_div.append(apply_button);
+            apply_button.style.marginBottom = "10px"
+            this.button_div.append(apply_button);
+            // Add 'new link' buttons with opening order priority
+            this.addNewLinkButton = function(high_priority) {
+                var new_button;
+                if( high_priority ) {
+                    new_button = mxUtils.button("Add High Priority Link", () => {
+                        this.addNewLinkTextBox("", true);
+                    });
+                } else {
+                    new_button = mxUtils.button("Add Low Priority Link", () => {
+                        this.addNewLinkTextBox();
+                    });
+                }
+                new_button.style.marginLeft = "10px"
+                new_button.style.marginBottom= "10px"
+                this.button_div.append(new_button);
+            }
+            this.addNewLinkButton();
+            this.addNewLinkButton(true);
         };
-        ui.showDialog( new LocalLinkDialog(ui, cell).dialog_div, 320, 280, true, true);
+        ui.showDialog( new LocalLinkDialog(ui, cell).dialog_div, 450, 300, true, true );
     };
     // Function - Attempt to a new Drawio instance using a local link
     function openLocalLink(ui, cell) {
@@ -186,8 +248,13 @@ Draw.loadPlugin(function(ui) {
         };
         // Function - create / replace related xml elements
         this.writeToXml = function(cells_xml) {
-            var create = true;
-            var xml_node = getLocalLinkXmlNode(cells_xml, create);
+            // Delete XML object if no links
+            if( this.relative_paths.length == 0 ) {
+                var xml_node = getLocalLinkXmlNode(cells_xml);
+                xml_node.remove(); //< Delete XML object if not links
+                return true;
+            }
+            var xml_node = getLocalLinkXmlNode(cells_xml, true);
             if( xml_node == null ) return false;
             var enc = new mxCodec();
             this.Init(); //< Set the key before encoding
@@ -216,24 +283,5 @@ Draw.loadPlugin(function(ui) {
     };
     // Register Object codec
     mxCodecRegistry.register( new mxObjectCodec(new LocalLinkPluginData()) );
-
-    // Generic Helper Functions
-    ////////////////////////////////////////////////////////////////////////////
-    // Function - @return Xml document used as a cell's `value`  @param cell Cell  
-    // @param create_data Make's cell's value support XML elements / nodes
-    // - Note: From mxGraph->mxCell docs - override functions (already done in
-    //   Drawio source) `graph.convertValueToString` & `graph.cellLabelChanged`
-    //   to allow XML - create attribute `label` to preserve non-node values
-    function getCellsXmlDataElem(cell, create_data) {
-        if( ! cell ) return null;
-        if( cell.value && mxUtils.isNode(cell.value) ) return cell.value;
-        if( !create_data ) return null;
-        var cells_non_node_value = cell.value;
-        cell.value = mxUtils.createXmlDocument().createElement('root');
-        if( cells_non_node_value ) { //< Read above function doc
-            cell.value.setAttribute('label', cells_non_node_value);
-        }
-        return cell.value;
-    };
 
 }); // End loadPlugin
