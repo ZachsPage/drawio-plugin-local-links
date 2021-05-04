@@ -1,5 +1,5 @@
 
-const path_module = require('path').posix;
+const path = require('path');
 const fs = require('fs');
 
 // Entry point for loading plugins
@@ -22,7 +22,7 @@ Draw.loadPlugin(function(ui) {
 
     // Generic Helper Functions
     ////////////////////////////////////////////////////////////////////////////
-    // Function - @return Xml document used as a cell's `value`  @param cell Cell  
+    // Function - @return Cell's data supporting XML elements, or null if unsupported
     // @param create_data Make's cell's value support XML elements / nodes
     // - Note: From mxGraph->mxCell docs - override functions (already done in
     //   Drawio source) `graph.convertValueToString` & `graph.cellLabelChanged`
@@ -38,6 +38,14 @@ Draw.loadPlugin(function(ui) {
         }
         return cell.value;
     };
+	// Function - @return file_path converted to a Posix '/' path
+    function convertToPosixPath(file_path) {
+        return file_path.split(path.sep).join(path.posix.sep);
+    }
+    // Function - @return file_path converted to a compatible system path
+    function convertToSystemPath(file_path) {
+        return file_path.split(path.posix.sep).join(path.sep);
+    }
 
     // Menu Creation
     ////////////////////////////////////////////////////////////////////////////
@@ -57,33 +65,38 @@ Draw.loadPlugin(function(ui) {
         if( ! can_store_link ) return;
 
         // Create the plugin's menu items:
+        // - Check if has an existing link
+        var cells_xml = getCellsXmlDataElem(cell);
+        var has_existing_link = (cells_xml && getLocalLinkXmlNode(cells_xml)) ?
+            true : false;
         // - Top item to open the sub-menu
-        var menu_top = new MenuAction("Plugin: Local Links...", "local_link_open_menu");
+        var menu_top_text = has_existing_link ? 
+            "Plugin: Local Links (Has Links...)" : "Plugin: Local Links..."
+        var menu_top = new MenuAction(menu_top_text, "local_link_open_menu");
         menu.addSeparator();
         var top_menu = this.addMenuItem(menu, menu_top.action, null, evt);
         menu.addSeparator();
+        // - Add the `Open` sub-menu button - if the cell has some local links
+        if( has_existing_link ) {
+            var menu_open_link = new MenuAction("Open Local Link", "local_link_open",
+              function(){ 
+                if( !pluginIsSupported(ui) ) return;
+                openLocalLink(ui, cell);
+            });
+            this.addMenuItems(menu, ['-', menu_open_link.action], top_menu, evt);
+        }
         // - Add the `Edit Link` sub-menu button
         var menu_edit_links = new MenuAction("Edit Local Links", "local_link_edit", function(){ 
             if( !pluginIsSupported(ui) ) return;
             createLocalLinkEditorWindow(ui, cell);
         });
         this.addMenuItems(menu, ['-', menu_edit_links.action], top_menu, evt);
-        // - Add the `Open` sub-menu button - if the cell has some local links
-        var cells_xml = getCellsXmlDataElem(cell);
-        if( cells_xml && getLocalLinkXmlNode(cells_xml) ) {
-            var menu_open_link = new MenuAction("Open Local Link", "local_link_open",
-              function(){ 
-                if( !pluginIsSupported(ui) ) return;
-                openLocalLink(ui, cell);
-            });
-        this.addMenuItems(menu, ['-', menu_open_link.action], top_menu, evt);
-        }
     };
 
     // Menu Button Click Handling
     ////////////////////////////////////////////////////////////////////////////
     // Class - Shorten creation of text boxes with associated buttons
-    function TextAndRemoveButtonPair(parent_div, init_value, rm_callback) {
+    function TextAndRemoveButtonPair(parent_div, init_value, prepend) {
         this.parent_div = parent_div;
         this.text_box = document.createElement('textarea');
         this.rm_callback = null;
@@ -100,11 +113,16 @@ Draw.loadPlugin(function(ui) {
         this.text_box.style.float = 'left'
         this.text_box.style.marginBottom = '5px'
         if( init_value ) this.text_box.value = init_value; 
-        parent_div.appendChild( this.text_box );
         this.button.style.float = 'left'
         this.button.style.height = '34px'
         this.button.style.margin = '2px 2px 2px 5px'
-        parent_div.appendChild( this.button );
+        if( prepend ) {
+            parent_div.prepend( this.button );
+            parent_div.prepend( this.text_box);
+        } else {
+            parent_div.append( this.text_box);
+            parent_div.append( this.button );
+        }
     };
 
     // Function - Create the window to create / edit / view local links
@@ -122,7 +140,9 @@ Draw.loadPlugin(function(ui) {
                     var box_idx = this.link_box_button_pairs.indexOf(new_box);
                     this.link_box_button_pairs.splice(box_idx, 1);
                 })
-                this.link_box_button_pairs.push( new_box );
+                prepend ?
+                    this.link_box_button_pairs.unshift( new_box ) :
+                    this.link_box_button_pairs.push( new_box );
             }
             // Create the base divs to keep the element order correct
             this.dialog_div = document.createElement('div');
@@ -156,7 +176,8 @@ Draw.loadPlugin(function(ui) {
                 this.link_box_button_pairs.forEach((pair) => {
                     var box_value = pair.text_box.value;
                     if( box_value ) box_value = box_value.trim();
-                    if( box_value ) this.link_data.relative_paths.push(box_value);
+                    if( box_value )
+                        this.link_data.relative_paths.push( convertToPosixPath(box_value) );
                 });
                 if( ! this.link_data.writeToXml(cells_xml) ) 
                     alert("Plugin: Local Links - Failed to store links!");
@@ -187,16 +208,16 @@ Draw.loadPlugin(function(ui) {
     // Function - Attempt to a new Drawio instance using a local link
     function openLocalLink(ui, cell) {
         // Know we can get the local files path since the plugin is supported
-        var local_file_path = ui.currentFile.fileObject.path;
-        var this_files_dir = path_module.dirname(local_file_path);
+        var local_file_path = convertToPosixPath(ui.currentFile.fileObject.path);
+        var this_files_dir = path.dirname(local_file_path);
         // Know cells_xml is valid since this button was added
         var cells_xml = getCellsXmlDataElem(cell);
         var links = new LocalLinkPluginData();
         if( links.readFromXml(cells_xml) ) {
             var link_to_use = "";
-            links.relative_paths.forEach((path) => {
-                var local_link = path_module.join(this_files_dir, path);
-                local_link = path_module.normalize(local_link);
+            links.relative_paths.forEach((rel_path) => {
+                var local_link = path.join(this_files_dir, rel_path);
+                local_link = path.normalize( convertToSystemPath(local_link) );
                 if( fs.existsSync(local_link) ) {
                     // Get the first existing file then leave
                     link_to_use = local_link;
@@ -204,10 +225,10 @@ Draw.loadPlugin(function(ui) {
                 }
             });
 
-            link_to_use ? 
+            link_to_use ?
                 openNewDrawioWindow(link_to_use) :
                 alert("Plugin - locallinks - No valid local files found. " +
-                    "In order, attempted to use : \n  - " + 
+                    "In order, attempted to use these relative paths: \n  - " + 
                     links.relative_paths.join('\n  - '));
         }
 
@@ -217,8 +238,16 @@ Draw.loadPlugin(function(ui) {
             const { BrowserWindow } = require('electron').remote
             var win_id = ipcRenderer.sendSync('winman', {action:'newfile'});
             var new_window = BrowserWindow.fromId(win_id);
+            // Don't like this sleep, but oddly needed for Windows...
+            function sleep(ms) {
+                return(new Promise(function(resolve, reject) {        
+                    setTimeout(function() { resolve(); }, ms);        
+                }));    
+            }
             new_window.webContents.on('did-finish-load', function() {
-                new_window.webContents.send('args-obj', {args: [file_link]});
+                sleep(500).then(function() {
+                    new_window.webContents.send('args-obj', {args: [file_link]});
+                });
             });
         };
     };
