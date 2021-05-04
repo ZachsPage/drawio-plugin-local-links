@@ -5,7 +5,7 @@ const fs = require('fs');
 // Entry point for loading plugins
 Draw.loadPlugin(function(ui) {
 
-    // ui - object passed in is defined in src/main/webapp/js/diagramly/App.js
+    // ui - Object defined in src/main/webapp/js/diagramly/App.js
     // ui.editor -> Editor.js / ui.editor.graph -> Graph -> grapheditor/Graph.js
     var graph = ui.editor.graph;
     var cell_editor = graph.createCellEditor();
@@ -38,7 +38,7 @@ Draw.loadPlugin(function(ui) {
         }
         return cell.value;
     };
-	// Function - @return file_path converted to a Posix '/' path
+    // Function - @return file_path converted to a Posix '/' path
     function convertToPosixPath(file_path) {
         return file_path.split(path.sep).join(path.posix.sep);
     }
@@ -95,7 +95,7 @@ Draw.loadPlugin(function(ui) {
 
     // Menu Button Click Handling
     ////////////////////////////////////////////////////////////////////////////
-    // Class - Shorten creation of text boxes with associated buttons
+    // Class - Shorten creation of text boxes with associated "remove" buttons
     function TextAndRemoveButtonPair(parent_div, init_value, prepend) {
         this.parent_div = parent_div;
         this.text_box = document.createElement('textarea');
@@ -205,7 +205,7 @@ Draw.loadPlugin(function(ui) {
         };
         ui.showDialog( new LocalLinkDialog(ui, cell).dialog_div, 450, 300, true, true );
     };
-    // Function - Attempt to a new Drawio instance using a local link
+    // Function - Attempt to open a new Drawio instance using a local link
     function openLocalLink(ui, cell) {
         // Know we can get the local files path since the plugin is supported
         var local_file_path = convertToPosixPath(ui.currentFile.fileObject.path);
@@ -264,7 +264,7 @@ Draw.loadPlugin(function(ui) {
         this.Init = function() { this.key = 0x5050; }
         // Function - check that the decoded object is valid - MUST match this.key
         this.isValid = function() { return this.key == 0x5050 ? true : false }
-        // Function - populate object with elements from an cells_xml
+        // Function - populate object with elements from a cell's xml data
         this.readFromXml = function(cells_xml) {
             var xml_node = getLocalLinkXmlNode(cells_xml);
             if( xml_node == null ) return false;
