@@ -1,4 +1,19 @@
 # Drawio / Diagrams.net Plugin - Local Links
+## Deprecated
+This plugin is deprecated and no longer maintained.
+* Drawio-desktop removed external plugin support in v31.1.5 (2026-07-30) - see
+  [jgraph/drawio-desktop#2499](https://github.com/jgraph/drawio-desktop/issues/2499).
+  The maintainers cited the security attack surface of running arbitrary plugin
+  code inside the officially signed app.
+* The `--enable-plugins` flag no longer has any effect, so this plugin cannot be
+  loaded in current Drawio-desktop releases.
+
+## Suggested Alternative - Drawio VSCode Extension
+Use `Draw.io Integration by Henning Dieterichs` - it edits `.drawio.png` files
+in place and can link a block to another local file, including other diagrams.
+* [VSCode Extension Link](https://marketplace.visualstudio.com/items?itemName=hediet.vscode-drawio)
+* [Github link here](https://github.com/hediet/vscode-drawio)
+
 ## Disclaimer / Support
 Use this plugin at your own risk - I'm not responsible for any issues, data loss, etc.
 Only supported in `Drawio-desktop` while opening local files.
@@ -32,9 +47,3 @@ together at a system level, without having one monolithic "system" diagram.
 ## Possible Improvements
 * Add ability to preview the linked image instead of opening a new Drawio instance
 * Add ability to preview other files - like `readme.md` using paths
-
-## Additional Suggestion - Drawio VSCode Extension
-* Use `Draw.io Integration by Henning Dieterichs` for great Drawio -> VSCode integration
-    * [VSCode Extension Link](https://marketplace.visualstudio.com/items?itemName=hediet.vscode-drawio)
-    * [Github link here](https://github.com/hediet/vscode-drawio)
-    * **Note:** Don't believe this supports Plugins (like this repo, though)
